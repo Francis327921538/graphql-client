@@ -7,10 +7,10 @@ require "time"
 class TestSchemaType < MiniTest::Test
   DateTime = GraphQL::ScalarType.define do
     name "DateTime"
-    coerce_input ->(value) do
+    coerce_input ->(value, *) do
       Time.iso8601(value)
     end
-    coerce_result ->(value) do
+    coerce_result ->(value, *) do
       value.utc.iso8601
     end
   end

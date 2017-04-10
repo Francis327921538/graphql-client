@@ -19,7 +19,11 @@ module GraphQL
         def cast(type, value)
           case type.unwrap
           when GraphQL::ScalarType
-            type.coerce_input(value)
+            if type.respond_to?(:coerce_isolated_input)
+              type.coerce_isolated_input(value)
+            else
+              type.coerce_input(value)
+            end
           when GraphQL::ObjectType
             SchemaClass.class_for(type.unwrap).new(value)
           else
