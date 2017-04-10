@@ -30,6 +30,26 @@ module GraphQL
           ListWrapper.new(wrap(source_definition, node, type.of_type, name: name))
         when GraphQL::ScalarType
           ScalarWrapper.new(type)
+        when GraphQL::EnumType
+          EnumWrapper.new(type)
+        # when GraphQL::UnionType
+        #   types = {}
+        #
+        #   node.selections.each do |selection|
+        #     case selection
+        #     when Language::Nodes::InlineFragment
+        #       selection_type = source_definition.document_types[selection]
+        #       selection_wrapper = wrap(source_definition, selection, selection_type, name: name)
+        #       if types[selection_type]
+        #         p [:merge, selection_type]
+        #         types[selection_type.name] |= selection_wrapper
+        #       else
+        #         types[selection_type.name] = selection_wrapper
+        #       end
+        #     end
+        #   end
+        #
+        #   UnionWrapper.new(types)
         when GraphQL::ObjectType, GraphQL::InterfaceType, GraphQL::UnionType
           fields = {}
 
@@ -57,6 +77,26 @@ module GraphQL
         end
       end
 
+      class UnionWrapper
+        def initialize(possible_types)
+          @possible_types = possible_types
+        end
+
+        def cast(value, errors = nil)
+          typename = value && value["__typename"]
+          if wrapper = @possible_types[typename]
+            wrapper.cast(value, errors)
+          else
+            raise TypeError, "expected union value to be #{@possible_types.keys.join(", ")}, but was #{typename}"
+          end
+        end
+
+        def |(_other)
+          # XXX: How would union merge?
+          self
+        end
+      end
+
       class ListWrapper
         def initialize(type)
           @of_klass = type
@@ -68,6 +108,8 @@ module GraphQL
             List.new(value.each_with_index.map { |e, idx|
               @of_klass.cast(e, errors.filter_by_path(idx))
             }, errors)
+          when NilClass
+            nil
           else
             raise ArgumentError, "expected list value to be an Array, but was #{value.class}"
           end
@@ -109,6 +151,21 @@ module GraphQL
         end
       end
 
+      class EnumWrapper
+        def initialize(type)
+          @type = type
+        end
+
+        def cast(value, _errors = nil)
+          value
+        end
+
+        def |(_other)
+          # XXX: How would enums merge?
+          self
+        end
+      end
+
       # :nodoc:
       class ScalarWrapper
         def initialize(type)
@@ -117,9 +174,19 @@ module GraphQL
 
         def cast(value, _errors = nil)
           if value.is_a? Array
-            value.map { |item|  @type.coerce_input(item) }
+            value.map { |item|
+              if @type.respond_to?(:coerce_isolated_input)
+                @type.coerce_isolated_input(item)
+              else
+                @type.coerce_input(item)
+              end
+            }
           else
-            @type.coerce_input(value)
+            if @type.respond_to?(:coerce_isolated_input)
+              @type.coerce_isolated_input(value)
+            else
+              @type.coerce_input(value)
+            end
           end
         end
 
