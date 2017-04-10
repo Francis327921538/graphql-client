@@ -33,6 +33,7 @@ class TestSchemaType < MiniTest::Test
   QueryType = GraphQL::ObjectType.define do
     name "Query"
     field :me, !PersonType
+    field :node, NodeType
   end
 
   Schema = GraphQL::Schema.define(query: QueryType) do
@@ -44,6 +45,7 @@ class TestSchemaType < MiniTest::Test
   def test_query_object_class
     assert_equal Class, Types::Query.class
     assert_includes Types::Query.instance_methods, :me
+    assert_includes Types::Query.instance_methods, :node
 
     assert query = Types::Query.new({
       "me" => {
