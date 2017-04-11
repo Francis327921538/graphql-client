@@ -144,16 +144,19 @@ class TestSchemaType < MiniTest::Test
     assert_kind_of GraphQL::Client::SchemaClass::NonNullType, Types::Person.fields[:friends].of_klass.of_klass
     assert_kind_of GraphQL::Client::SchemaClass::ObjectType, Types::Person.fields[:friends].of_klass.of_klass.of_klass
     assert_equal Types::Person, Types::Person.fields[:friends].of_klass.of_klass.of_klass
+
+    assert_kind_of GraphQL::Client::SchemaClass::NonNullType, Types::Person.fields[:id]
+    assert_equal Types::ID, Types::Person.fields[:id].of_klass
   end
 
   def test_query_object_subclass
     query_klass = Class.new(Types::Query)
     person_klass = Class.new(Types::Person)
 
-    query_klass.define_field :me, :me, person_klass
+    query_klass.define_field :me, person_klass
     assert_includes query_klass.instance_methods, :me
 
-    person_klass.define_field :id, :id
+    person_klass.define_field :id, Types::Person.fields[:id]
     assert_includes person_klass.instance_methods, :id
 
     assert query = query_klass.new({
@@ -174,11 +177,11 @@ class TestSchemaType < MiniTest::Test
   def test_person_object_subclass
     person_klass = Class.new(Types::Person)
 
-    person_klass.define_field :id, :id
-    person_klass.define_field :name, :name
-    person_klass.define_field :first_name, :firstName
-    person_klass.define_field :last_name, :lastName
-    person_klass.define_field :birthday, :birthday
+    person_klass.define_field :id, Types::Person.fields[:id]
+    person_klass.define_field :name, Types::Person.fields[:name]
+    person_klass.define_field :firstName, Types::Person.fields[:firstName]
+    person_klass.define_field :lastName, Types::Person.fields[:lastName]
+    person_klass.define_field :birthday, Types::Person.fields[:birthday]
 
     assert_includes person_klass.instance_methods, :id
     assert_includes person_klass.instance_methods, :name

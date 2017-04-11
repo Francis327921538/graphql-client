@@ -22,6 +22,10 @@ module GraphQL
         def initialize(of_klass)
           @of_klass = of_klass
         end
+
+        def new(*args)
+          @of_klass.new(*args)
+        end
       end
 
       class ListType
@@ -38,41 +42,20 @@ module GraphQL
           obj.fields = {}
         end
 
-        def define_field(method_name, field_name, type = nil)
-          @fields[method_name] = type
+        def define_field(name, type)
+          @fields[name] = type
+          method_name = ActiveSupport::Inflector.underscore(name)
           class_eval <<-RUBY, __FILE__, __LINE__+1
             def #{method_name}
-              fetch(:#{field_name})
+              fetch(:#{name})
             end
           RUBY
         end
 
         module InstanceMethods
           def fetch(name)
-            if klass = self.class.fields[name]
-              klass.new(@data.fetch(name.to_s))
-            else
-              cast(self.class.type.get_field(name.to_s).type, @data.fetch(name.to_s))
-            end
-          end
-
-          def cast(type, value)
-            case type
-            when GraphQL::NonNullType
-              cast(type.of_type, value)
-            when GraphQL::ListType
-              value.map { |v| cast(type.of_type, v) }
-            when GraphQL::ScalarType
-              if type.respond_to?(:coerce_isolated_input)
-                type.coerce_isolated_input(value)
-              else
-                type.coerce_input(value)
-              end
-            when GraphQL::ObjectType
-              SchemaClass.class_for(type.unwrap).new(value)
-            else
-              raise TypeError, "unknown type #{type.class}"
-            end
+            klass = self.class.fields[name]
+            klass.new(@data.fetch(name.to_s))
           end
 
           def to_h
@@ -90,6 +73,13 @@ module GraphQL
       end
 
       module ScalarType
+        def new(value)
+          if type.respond_to?(:coerce_isolated_input)
+            type.coerce_isolated_input(value)
+          else
+            type.coerce_input(value)
+          end
+        end
       end
 
       module InterfaceType
@@ -196,16 +186,14 @@ module GraphQL
             end
           RUBY
 
-          # method_name = ActiveSupport::Inflector.underscore(name)
-
           @cache[type] = klass
 
           type.interfaces.each do |interface|
             klass.send :include, class_for(interface)
           end
 
-          type.fields.each do |name, field|
-            klass.fields[name.to_sym] = class_for(field.type)
+          type.all_fields.each do |field|
+            klass.fields[field.name.to_sym] = class_for(field.type)
           end
 
           klass
