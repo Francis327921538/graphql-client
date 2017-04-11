@@ -7,31 +7,6 @@ require "graphql/client/errors"
 module GraphQL
   class Client
     module SchemaClass
-      class UnfetchedFieldError < Error; end
-
-      class Base
-        def fetch(name)
-          cast(self.class.type.get_field(name.to_s).type, @data.fetch(name.to_s) {
-            raise UnfetchedFieldError, "unfetched field `#{name}' on #{self.class} type. https://git.io/v1y3U"
-          })
-        end
-
-        def cast(type, value)
-          case type.unwrap
-          when GraphQL::ScalarType
-            if type.respond_to?(:coerce_isolated_input)
-              type.coerce_isolated_input(value)
-            else
-              type.coerce_input(value)
-            end
-          when GraphQL::ObjectType
-            SchemaClass.class_for(type.unwrap).new(value)
-          else
-            raise TypeError, "unknown type #{type.unwrap.class}"
-          end
-        end
-      end
-
       def self.generate(schema)
         mod = Module.new
         schema.types.each do |name, type|
@@ -39,6 +14,91 @@ module GraphQL
           mod.const_set(name, class_for(type))
         end
         mod
+      end
+
+      class NonNullType
+        attr_reader :of_klass
+
+        def initialize(of_klass)
+          @of_klass = of_klass
+        end
+      end
+
+      class ListType
+        attr_reader :of_klass
+
+        def initialize(of_klass)
+          @of_klass = of_klass
+        end
+      end
+
+      module ObjectType
+        def inherited(obj)
+          obj.type = self.type
+          obj.fields = {}
+        end
+
+        def define_field(method_name, field_name, type = nil)
+          @fields[method_name] = type
+          class_eval <<-RUBY, __FILE__, __LINE__+1
+            def #{method_name}
+              fetch(:#{field_name})
+            end
+          RUBY
+        end
+
+        module InstanceMethods
+          def fetch(name)
+            if klass = self.class.fields[name]
+              klass.new(@data.fetch(name.to_s))
+            else
+              cast(self.class.type.get_field(name.to_s).type, @data.fetch(name.to_s))
+            end
+          end
+
+          def cast(type, value)
+            case type
+            when GraphQL::NonNullType
+              cast(type.of_type, value)
+            when GraphQL::ListType
+              value.map { |v| cast(type.of_type, v) }
+            when GraphQL::ScalarType
+              if type.respond_to?(:coerce_isolated_input)
+                type.coerce_isolated_input(value)
+              else
+                type.coerce_input(value)
+              end
+            when GraphQL::ObjectType
+              SchemaClass.class_for(type.unwrap).new(value)
+            else
+              raise TypeError, "unknown type #{type.class}"
+            end
+          end
+
+          def to_h
+            @data
+          end
+
+          def ==(other)
+            eql?(other)
+          end
+
+          def eql?(other)
+            is_a?(other.class) && self.to_h == other.to_h
+          end
+        end
+      end
+
+      module ScalarType
+      end
+
+      module InterfaceType
+      end
+
+      module EnumType
+      end
+
+      module UnionType
       end
 
       def self.class_for(type)
@@ -49,10 +109,18 @@ module GraphQL
         end
 
         case type
-        when GraphQL::ScalarType
+        when GraphQL::InputObjectType
           nil
-        when GraphQL::InterfaceType
+
+        when GraphQL::ListType
+          @cache[type] = ListType.new(class_for(type.of_type))
+
+        when GraphQL::NonNullType
+          @cache[type] = NonNullType.new(class_for(type.of_type))
+
+        when GraphQL::EnumType
           mod = Module.new
+          mod.extend(EnumType)
 
           mod.instance_eval <<-RUBY
             class << self
@@ -62,18 +130,29 @@ module GraphQL
 
           mod.type = type
 
-          type.fields.each do |name, field|
-            method_name = ActiveSupport::Inflector.underscore(name)
-            mod.class_eval <<-RUBY, __FILE__, __LINE__+1
-              def #{method_name}
-                fetch(:#{name})
-              end
-            RUBY
+          type.values.keys.each do |value|
+            mod.const_set(value, value)
           end
 
           @cache[type] = mod
-        when GraphQL::ObjectType
-          klass = Class.new(Base)
+
+        when GraphQL::UnionType
+          mod = Module.new
+          mod.extend(UnionType)
+
+          mod.instance_eval <<-RUBY
+            class << self
+              attr_accessor :type
+            end
+          RUBY
+
+          mod.type = type
+
+          @cache[type] = mod
+
+        when GraphQL::ScalarType
+          klass = Class.new
+          klass.extend(ScalarType)
 
           klass.instance_eval <<-RUBY
             class << self
@@ -83,26 +162,53 @@ module GraphQL
 
           klass.type = type
 
+          @cache[type] = klass
+        when GraphQL::InterfaceType
+          mod = Module.new
+          mod.extend(InterfaceType)
+
+          mod.instance_eval <<-RUBY
+            class << self
+              attr_accessor :type
+            end
+          RUBY
+
+          mod.type = type
+
+          @cache[type] = mod
+        when GraphQL::ObjectType
+          klass = Class.new
+          klass.extend(ObjectType)
+          klass.send :include, ObjectType::InstanceMethods
+
+          klass.instance_eval <<-RUBY
+            class << self
+              attr_accessor :type, :fields
+            end
+          RUBY
+
+          klass.type = type
+          klass.fields = {}
+
           klass.class_eval <<-RUBY
             def initialize(data = {})
               @data = data
             end
           RUBY
 
+          # method_name = ActiveSupport::Inflector.underscore(name)
+
+          @cache[type] = klass
+
           type.interfaces.each do |interface|
             klass.send :include, class_for(interface)
           end
 
           type.fields.each do |name, field|
-            method_name = ActiveSupport::Inflector.underscore(name)
-            klass.class_eval <<-RUBY, __FILE__, __LINE__+1
-              def #{method_name}
-                fetch(:#{name})
-              end
-            RUBY
+            klass.fields[name.to_sym] = class_for(field.type)
           end
 
-          @cache[type] = klass
+          klass
         else
           raise TypeError, "unexpected #{type.class}"
         end
