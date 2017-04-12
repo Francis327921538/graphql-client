@@ -71,65 +71,55 @@ class TestSchemaType < MiniTest::Test
   Types = GraphQL::Client::SchemaClass.generate(Schema)
 
   def test_query_object_class
-    assert_equal Class, Types::Query.class
     assert_equal QueryType, Types::Query.type
     assert_equal "TestSchemaType::Types::Query", Types::Query.inspect
   end
 
   def test_person_object_class
-    assert_equal Class, Types::Person.class
     assert Types::Person < Types::Node
     assert_equal PersonType, Types::Person.type
     assert_equal "TestSchemaType::Types::Person", Types::Person.inspect
   end
 
   def test_id_scalar_object
-    assert_equal Class, Types::ID.class
     assert_equal GraphQL::ID_TYPE, Types::ID.type
     assert_equal "TestSchemaType::Types::ID", Types::ID.inspect
   end
 
   def test_string_scalar_object
-    assert_equal Class, Types::String.class
     assert_equal GraphQL::STRING_TYPE, Types::String.type
     assert_equal "TestSchemaType::Types::String", Types::String.inspect
   end
 
   def test_int_scalar_object
-    assert_equal Class, Types::Int.class
     assert_equal GraphQL::INT_TYPE, Types::Int.type
     assert_equal "TestSchemaType::Types::Int", Types::Int.inspect
   end
 
   def test_datetime_scalar_object
-    assert_equal Class, Types::DateTime.class
     assert_equal DateTime, Types::DateTime.type
     assert_equal "TestSchemaType::Types::DateTime", Types::DateTime.inspect
     assert_equal Time.at(0), Types::DateTime.cast(Time.at(0).iso8601)
   end
 
   def test_boolean_scalar_object
-    assert_equal Class, Types::Boolean.class
     assert_equal GraphQL::BOOLEAN_TYPE, Types::Boolean.type
     assert_equal "TestSchemaType::Types::Boolean", Types::Boolean.inspect
   end
 
   def test_node_interface_module
-    assert_equal Module, Types::Node.class
     assert_equal NodeType, Types::Node.type
     assert_equal "TestSchemaType::Types::Node", Types::Node.inspect
   end
 
   def test_search_result_union
     assert_kind_of GraphQL::Client::SchemaClass::UnionType, Types::SearchResult
-    assert_equal Module, Types::SearchResult.class
     assert_equal SearchResultUnion, Types::SearchResult.type
     assert_equal "TestSchemaType::Types::SearchResult", Types::SearchResult.inspect
   end
 
   def test_plan_enum_constants
     assert_kind_of GraphQL::Client::SchemaClass::EnumType, Types::Plan
-    assert_equal Module, Types::Plan.class
     assert_equal PlanEnum, Types::Plan.type
     assert_equal "TestSchemaType::Types::Plan", Types::Plan.inspect
     assert_equal "FREE", Types::Plan.cast("FREE")
@@ -159,6 +149,9 @@ class TestSchemaType < MiniTest::Test
   def test_query_object_subclass
     query_klass = Class.new(Types::Query)
     person_klass = Class.new(Types::Person)
+
+    assert_equal QueryType, query_klass.type
+    assert_equal PersonType, person_klass.type
 
     query_klass.define_field :me, person_klass
     assert_includes query_klass.instance_methods, :me
@@ -219,6 +212,10 @@ class TestSchemaType < MiniTest::Test
       }]
     })
 
+    assert_kind_of person_klass, person
+    assert_kind_of Types::Person, person
+    assert_kind_of Types::Node, person
+
     assert_equal "1", person.id
     assert_equal "Josh", person.name
     assert_equal "Joshua", person.first_name
@@ -243,7 +240,7 @@ class TestSchemaType < MiniTest::Test
   def test_interface_cast
     query_klass = Class.new(Types::Query)
     person_klass = Class.new(Types::Person)
-    node_klass = Types::Node.new({"Person" => person_klass})
+    node_klass = GraphQL::Client::SchemaClass::PossibleTypes.new({"Person" => person_klass})
 
     query_klass.define_field :node, node_klass
     assert_includes query_klass.instance_methods, :node
@@ -267,7 +264,7 @@ class TestSchemaType < MiniTest::Test
   def test_union_cast
     query_klass = Class.new(Types::Query)
     person_klass = Class.new(Types::Person)
-    search_result_klass = Types::SearchResult.new({"Person" => person_klass})
+    search_result_klass = GraphQL::Client::SchemaClass::PossibleTypes.new({"Person" => person_klass})
 
     query_klass.define_field :firstSearchResult, search_result_klass
     assert_includes query_klass.instance_methods, :first_search_result

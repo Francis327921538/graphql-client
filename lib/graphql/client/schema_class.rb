@@ -19,11 +19,11 @@ module GraphQL
       end
 
       class NonNullType
-        attr_reader :of_klass
-
         def initialize(of_klass)
           @of_klass = of_klass
         end
+
+        attr_reader :of_klass
 
         def cast(value)
           @of_klass.cast(value)
@@ -35,11 +35,11 @@ module GraphQL
       end
 
       class ListType
-        attr_reader :of_klass
-
         def initialize(of_klass)
           @of_klass = of_klass
         end
+
+        attr_reader :of_klass
 
         def cast(values)
           case values
@@ -70,70 +70,30 @@ module GraphQL
         end
       end
 
-      module EnumType
-        def self.new(type)
-          mod = Module.new
-          mod.extend(EnumType)
-
-          mod.type = type
-
-          type.values.keys.each do |value|
-            mod.const_set(value, value)
-          end
-
-          mod
+      class TypeModule < Module
+        def initialize(type)
+          @type = type
         end
 
-        attr_accessor :type
+        attr_reader :type
+      end
+
+      class EnumType < TypeModule
+        def initialize(type)
+          super(type)
+
+          type.values.keys.each do |value|
+            const_set(value, value)
+          end
+        end
 
         def cast(value)
           value
         end
       end
 
-
-      module InterfaceType
-        def self.new(type)
-          mod = Module.new
-          mod.extend(InterfaceType)
-          mod.type = type
-          mod
-        end
-
-        attr_accessor :type
-
-        def new(types)
-          PossibleTypes.new(types)
-        end
-      end
-
-      module UnionType
-        def self.new(type)
-          mod = Module.new
-          mod.extend(UnionType)
-          mod.type = type
-          mod
-        end
-
-        attr_accessor :type
-
-        def new(types)
-          PossibleTypes.new(types)
-        end
-      end
-
-      class ScalarType
-        def self.new(type)
-          klass = Class.new(ScalarType)
-          klass.type = type
-          klass
-        end
-
-        class << self
-          attr_accessor :type
-        end
-
-        def self.cast(value)
+      class ScalarType < TypeModule
+        def cast(value)
           if value
             if type.respond_to?(:coerce_isolated_input)
               type.coerce_isolated_input(value)
@@ -146,39 +106,49 @@ module GraphQL
         end
       end
 
+      class InterfaceType < TypeModule
+      end
+
+      class UnionType < TypeModule
+      end
+
       module ObjectType
         def self.new(type)
-          klass = Class.new(InstanceMethods)
+          klass = Class.new
+          klass.send :include, InstanceMethods
+          klass.extend(ClassMethods)
           klass.extend(ObjectType)
           klass.type = type
           klass
         end
 
-        def inherited(obj)
-          obj.type = self.type
-        end
-
-        def define_field(name, type)
-          method_name = ActiveSupport::Inflector.underscore(name)
-          define_method(method_name) do
-            type.cast(@data.fetch(name.to_s))
+        module ClassMethods
+          def inherited(obj)
+            obj.type = self.type
           end
 
-          if name != method_name
-            define_method(name) do
+          def define_field(name, type)
+            method_name = ActiveSupport::Inflector.underscore(name)
+            define_method(method_name) do
               type.cast(@data.fetch(name.to_s))
             end
-            Deprecation.deprecate_methods(self, name => "Use ##{method_name} instead")
+
+            if name != method_name
+              define_method(name) do
+                type.cast(@data.fetch(name.to_s))
+              end
+              Deprecation.deprecate_methods(self, name => "Use ##{method_name} instead")
+            end
+          end
+
+          attr_accessor :type, :fields
+
+          def cast(value)
+            new(value)
           end
         end
 
-        attr_accessor :type, :fields
-
-        def cast(value)
-          new(value)
-        end
-
-        class InstanceMethods
+        module InstanceMethods
           def initialize(data = {})
             @data = data
           end
@@ -187,9 +157,7 @@ module GraphQL
 
 
       def self.class_for(type, cache)
-        if cache[type]
-          return cache[type]
-        end
+        return cache[type] if cache[type]
 
         case type
         when GraphQL::InputObjectType
