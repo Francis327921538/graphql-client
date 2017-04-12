@@ -25,8 +25,8 @@ module GraphQL
 
         attr_reader :of_klass
 
-        def cast(value)
-          @of_klass.cast(value)
+        def cast(value, errors)
+          @of_klass.cast(value, errors)
         end
 
         def inspect
@@ -41,10 +41,12 @@ module GraphQL
 
         attr_reader :of_klass
 
-        def cast(values)
+        def cast(values, errors)
           case values
           when Array
-            values.map { |value| @of_klass.cast(value) }
+            List.new(values.each_with_index.map { |e, idx|
+              @of_klass.cast(e, errors.filter_by_path(idx))
+            }, errors)
           else
             nil
           end
@@ -60,10 +62,10 @@ module GraphQL
           @possible_types = types
         end
 
-        def cast(value)
+        def cast(value, errors)
           typename = value && value["__typename"]
           if type = @possible_types[typename]
-            type.cast(value)
+            type.cast(value, errors)
           else
             nil
           end
@@ -87,13 +89,13 @@ module GraphQL
           end
         end
 
-        def cast(value)
+        def cast(value, _errors = nil)
           value
         end
       end
 
       class ScalarType < TypeModule
-        def cast(value)
+        def cast(value, _errors = nil)
           if value
             if type.respond_to?(:coerce_isolated_input)
               type.coerce_isolated_input(value)
@@ -130,12 +132,16 @@ module GraphQL
           def define_field(name, type)
             method_name = ActiveSupport::Inflector.underscore(name)
             define_method(method_name) do
-              type.cast(@data.fetch(name.to_s))
+              type.cast(@data.fetch(name.to_s), @errors.filter_by_path(name.to_s))
+            end
+
+            define_method("#{method_name}?") do
+              @data.fetch(name.to_s) ? true : false
             end
 
             if name != method_name
               define_method(name) do
-                type.cast(@data.fetch(name.to_s))
+                type.cast(@data.fetch(name.to_s), @errors.filter_by_path(name.to_s))
               end
               Deprecation.deprecate_methods(self, name => "Use ##{method_name} instead")
             end
@@ -143,14 +149,52 @@ module GraphQL
 
           attr_accessor :type, :fields
 
-          def cast(value)
-            new(value)
+          def cast(value, errors)
+            new(value, errors)
           end
         end
 
         module InstanceMethods
-          def initialize(data = {})
+          def initialize(data = {}, errors = Errors.new)
             @data = data
+            @errors = errors
+          end
+
+          def to_h
+            @data
+          end
+
+          # Public: Return errors associated with data.
+          #
+          # Returns Errors collection.
+          attr_reader :errors
+
+          def inspect
+            parent = self.class.ancestors.select { |m| m.is_a?(ObjectType) }.last
+
+            ivars = @data.map { |key, value|
+              if value.is_a?(Hash) || value.is_a?(Array)
+                "#{key}=..."
+              else
+                "#{key}=#{value.inspect}"
+              end
+            }
+
+            buf = "#<#{parent.name}".dup
+            buf << " " << ivars.join(" ") if ivars.any?
+            buf << ">"
+            buf
+          end
+
+          def typename
+            Deprecation.deprecation_warning("typename", "Use #class.type.name instead")
+            self.class.type.name
+          end
+
+          def type_of?(*types)
+            Deprecation.deprecation_warning("type_of?", "Use #is_a? instead")
+            names = ([self.class.type] + self.class.ancestors.select { |m| m.is_a?(TypeModule) }.map(&:type)).map(&:name)
+            types.any? { |type| names.include?(type.to_s) }
           end
         end
       end

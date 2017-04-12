@@ -169,6 +169,8 @@ class TestSchemaType < MiniTest::Test
     assert_kind_of person_klass, query.me
     assert_equal "1", query.me.id
 
+    assert_equal "#<TestSchemaType::Types::Query me=...>", query.inspect
+
     assert_raises NoMethodError do
       query.todo
     end
@@ -216,8 +218,11 @@ class TestSchemaType < MiniTest::Test
     assert_kind_of Types::Person, person
     assert_kind_of Types::Node, person
 
+    refute person.errors.any?
+
     assert_equal "1", person.id
     assert_equal "Josh", person.name
+    assert_equal true, person.name?
     assert_equal "Joshua", person.first_name
     assert_equal "Peek", person.last_name
     assert_equal Time.at(0), person.birthday
@@ -226,11 +231,36 @@ class TestSchemaType < MiniTest::Test
     assert_equal "2", person.friends[0].id
     assert_equal "David", person.friends[0].name
 
+    assert_equal({
+      "id" => "1",
+      "name" => "Josh",
+      "firstName" => "Joshua",
+      "lastName" => "Peek",
+      "birthday" => Time.at(0).iso8601,
+      "plan" => "FREE",
+      "friends" => [{
+        "id" => "2",
+        "name" => "David"
+      }]
+    }, person.to_h)
+
+    assert_equal "#<TestSchemaType::Types::Person id=\"1\" name=\"Josh\" firstName=\"Joshua\" lastName=\"Peek\" birthday=\"1969-12-31T16:00:00-08:00\" plan=\"FREE\" friends=...>", person.inspect
+
     assert_raises NoMethodError do
       person.age
     end
 
     refute person.respond_to?(:missing)
+
+    GraphQL::Client::Deprecation.silence do
+      assert_equal "Person", person.typename
+    end
+
+    GraphQL::Client::Deprecation.silence do
+      assert person.type_of?(:Person)
+      assert person.type_of?(:Node)
+      refute person.type_of?(:Photo)
+    end
 
     GraphQL::Client::Deprecation.silence do
       assert_equal "Joshua", person.firstName
