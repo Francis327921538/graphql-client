@@ -3,8 +3,8 @@ require "active_support/inflector"
 require "active_support/notifications"
 require "graphql"
 require "graphql/client/collocated_enforcement"
-require "graphql/client/definition"
 require "graphql/client/definition_variables"
+require "graphql/client/definition"
 require "graphql/client/error"
 require "graphql/client/errors"
 require "graphql/client/fragment_definition"
@@ -12,6 +12,7 @@ require "graphql/client/operation_definition"
 require "graphql/client/query_result"
 require "graphql/client/query_typename"
 require "graphql/client/response"
+require "graphql/client/schema_class"
 require "graphql/language/nodes/deep_freeze_ext"
 require "json"
 
@@ -30,6 +31,8 @@ module GraphQL
     extend CollocatedEnforcement
 
     attr_reader :schema, :execute
+
+    attr_reader :types
 
     attr_accessor :document_tracking_enabled
 
@@ -89,6 +92,8 @@ module GraphQL
       @document_tracking_enabled = false
       @allow_dynamic_queries = false
       @enforce_collocated_callers = enforce_collocated_callers
+
+      @types = SchemaClass.generate(@schema)
     end
 
     def parse(str, filename = nil, lineno = nil)
@@ -178,6 +183,7 @@ module GraphQL
         sliced_document = Language::DefinitionSlice.slice(document_dependencies, node.name)
         definition = Definition.for(
           schema: self.schema,
+          types: self.types,
           node: node,
           document: sliced_document,
           document_types: document_types,

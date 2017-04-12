@@ -18,10 +18,11 @@ module GraphQL
         end
       end
 
-      def initialize(node:, document:, schema:, document_types:, source_location:, enforce_collocated_callers:)
+      def initialize(node:, document:, schema:, types:, document_types:, source_location:, enforce_collocated_callers:)
         @definition_node = node
         @document = document
         @schema = schema
+        @types = types
         @document_types = document_types
         @source_location = source_location
         @enforce_collocated_callers = enforce_collocated_callers
@@ -61,6 +62,8 @@ module GraphQL
       attr_reader :document_types
 
       attr_reader :schema
+
+      attr_reader :types
 
       # Public: Returns the Ruby source filename and line number containing this
       # definition was not defined in Ruby.

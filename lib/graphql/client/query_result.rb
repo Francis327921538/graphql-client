@@ -25,32 +25,18 @@ module GraphQL
       def self.wrap(source_definition, node, type, name: nil)
         case type
         when GraphQL::NonNullType
-          NonNullWrapper.new(wrap(source_definition, node, type.of_type, name: name))
+          SchemaClass::NonNullType.new(wrap(source_definition, node, type.of_type, name: name))
         when GraphQL::ListType
-          ListWrapper.new(wrap(source_definition, node, type.of_type, name: name))
-        when GraphQL::ScalarType
-          ScalarWrapper.new(type)
-        when GraphQL::EnumType
-          EnumWrapper.new(type)
-        # when GraphQL::UnionType
-        #   types = {}
-        #
-        #   node.selections.each do |selection|
-        #     case selection
-        #     when Language::Nodes::InlineFragment
-        #       selection_type = source_definition.document_types[selection]
-        #       selection_wrapper = wrap(source_definition, selection, selection_type, name: name)
-        #       if types[selection_type]
-        #         p [:merge, selection_type]
-        #         types[selection_type.name] |= selection_wrapper
-        #       else
-        #         types[selection_type.name] = selection_wrapper
-        #       end
-        #     end
-        #   end
-        #
-        #   UnionWrapper.new(types)
-        when GraphQL::ObjectType, GraphQL::InterfaceType, GraphQL::UnionType
+          SchemaClass::ListType.new(wrap(source_definition, node, type.of_type, name: name))
+        when GraphQL::EnumType, GraphQL::ScalarType
+          source_definition.types.const_get(type.name)
+        when GraphQL::UnionType
+          raise NotImplementedError
+        when GraphQL::InterfaceType
+          raise NotImplementedError
+        when GraphQL::ObjectType
+          type_module = source_definition.types.const_get(type.name)
+
           fields = {}
 
           node.selections.each do |selection|
@@ -71,180 +57,31 @@ module GraphQL
             end
           end
 
-          define(name: name, type: type, source_definition: source_definition, source_node: node, fields: fields)
+          define(name: name, type_module: type_module, source_definition: source_definition, source_node: node, fields: fields)
         else
           raise TypeError, "unexpected #{type.class}"
         end
       end
 
-      class UnionWrapper
-        def initialize(possible_types)
-          @possible_types = possible_types
-        end
-
-        def cast(value, errors = nil)
-          typename = value && value["__typename"]
-          if wrapper = @possible_types[typename]
-            wrapper.cast(value, errors)
-          else
-            raise TypeError, "expected union value to be #{@possible_types.keys.join(", ")}, but was #{typename}"
-          end
-        end
-
-        def |(_other)
-          # XXX: How would union merge?
-          self
-        end
-      end
-
-      class ListWrapper
-        def initialize(type)
-          @of_klass = type
-        end
-
-        def cast(value, errors)
-          case value
-          when Array
-            List.new(value.each_with_index.map { |e, idx|
-              @of_klass.cast(e, errors.filter_by_path(idx))
-            }, errors)
-          when NilClass
-            nil
-          else
-            raise ArgumentError, "expected list value to be an Array, but was #{value.class}"
-          end
-        end
-
-        def |(other)
-          if self.class == other.class
-            self.of_klass | other.of_klass
-          else
-            raise TypeError, "expected other to be a #{self.class}"
-          end
-        end
-      end
-
-      class NonNullWrapper
-        attr_reader :of_klass
-
-        def initialize(type)
-          @of_klass = type
-        end
-
-        def cast(value, errors)
-          case value
-          when NilClass
-            # TODO
-            # raise ArgumentError, "expected non-nullable value to be present"
-            nil
-          else
-            @of_klass.cast(value, errors)
-          end
-        end
-
-        def |(other)
-          if self.class == other.class
-            self.of_klass | other.of_klass
-          else
-            raise TypeError, "expected other to be a #{self.class}"
-          end
-        end
-      end
-
-      class EnumWrapper
-        def initialize(type)
-          @type = type
-        end
-
-        def cast(value, _errors = nil)
-          value
-        end
-
-        def |(_other)
-          # XXX: How would enums merge?
-          self
-        end
-      end
-
-      # :nodoc:
-      class ScalarWrapper
-        def initialize(type)
-          @type = type
-        end
-
-        def cast(value, _errors = nil)
-          if value.is_a? Array
-            value.map { |item|
-              if @type.respond_to?(:coerce_isolated_input)
-                @type.coerce_isolated_input(item)
-              else
-                @type.coerce_input(item)
-              end
-            }
-          else
-            if @type.respond_to?(:coerce_isolated_input)
-              @type.coerce_isolated_input(value)
-            else
-              @type.coerce_input(value)
-            end
-          end
-        end
-
-        def |(_other)
-          # XXX: How would scalars merge?
-          self
-        end
-      end
-
       # Internal
-      def self.define(name:, type:, source_definition:, source_node:, fields: {})
+      def self.define(name:, type_module:, source_definition:, source_node:, fields: {})
         Class.new(self) do
           @name = name
-          @type = type
+          @type = type_module.type
+          @type_module = type_module
           @source_node = source_node
           @source_definition = source_definition
           @fields = {}
+
+          include type_module
 
           field_readers = Set.new
 
           fields.each do |field, klass|
             @fields[field.to_sym] = klass
-
-            send :attr_reader, field
+            define_field(field.to_sym, klass)
             field_readers << field.to_sym
-
-            # Convert GraphQL camelcase to snake case: commitComments -> commit_comments
-            field_alias = ActiveSupport::Inflector.underscore(field)
-            send :alias_method, field_alias, field if field != field_alias
-            field_readers << field_alias.to_sym
-
-            class_eval <<-RUBY, __FILE__, __LINE__
-              def #{field_alias}?
-                #{field_alias} ? true : false
-              end
-            RUBY
-            field_readers << "#{field_alias}?".to_sym
           end
-
-          assigns = @fields.map do |field, klass|
-            <<-RUBY
-              @#{field} = self.class.fields[:#{field}].cast(@data["#{field}"], @errors.filter_by_path("#{field}"))
-            RUBY
-          end
-
-          if @type.is_a?(GraphQL::ObjectType)
-            assigns.unshift "@__typename = self.class.type.name"
-          end
-
-          class_eval <<-RUBY, __FILE__, __LINE__
-            def initialize(data, errors = Errors.new)
-              @data = data
-              @errors = errors
-
-              #{assigns.join("\n")}
-              freeze
-            end
-          RUBY
 
           if @source_definition.enforce_collocated_callers
             Client.enforce_collocated_callers(self, field_readers, source_definition.source_location[0])
@@ -253,7 +90,7 @@ module GraphQL
       end
 
       class << self
-        attr_reader :type
+        attr_reader :type, :type_module
 
         attr_reader :source_definition
 
@@ -278,7 +115,7 @@ module GraphQL
         "#<#{name} fields=#{@fields.keys.inspect}>"
       end
 
-      def self.cast(obj, errors = Errors.new)
+      def self._cast(obj, errors = Errors.new)
         case obj
         when Hash
           new(obj, errors)
@@ -317,7 +154,7 @@ module GraphQL
         when Hash
           super
         else
-          cast(obj, *args)
+          _cast(obj, *args)
         end
       end
 
@@ -331,7 +168,7 @@ module GraphQL
           end
         end
         # TODO: Picking first source node seems error prone
-        define(name: self.name, type: self.type, source_definition: source_definition, source_node: source_node, fields: new_fields)
+        define(name: self.name, type_module: self.type_module, source_definition: source_definition, source_node: source_node, fields: new_fields)
       end
 
       # Public: Return errors associated with data.

@@ -795,6 +795,8 @@ class TestClient < MiniTest::Test
   end
 
   def test_client_parse_nested_inline_fragments_on_same_node
+    skip "TODO: Implement interface type wrappers"
+
     Temp.const_set :UserFragment, @client.parse(<<-'GRAPHQL')
       fragment on Node {
         id

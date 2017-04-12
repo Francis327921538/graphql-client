@@ -13,7 +13,7 @@ module GraphQL
         cache = {}
         schema.types.each do |name, type|
           next if name.start_with?("__")
-          mod.const_set(name, class_for(type, cache))
+          mod.const_set(name, class_for(schema, type, cache))
         end
         mod
       end
@@ -31,6 +31,15 @@ module GraphQL
 
         def inspect
           "#{of_klass.inspect}!"
+        end
+
+        # XXX: Remove type merging
+        def |(other)
+          if self.class == other.class
+            self.of_klass | other.of_klass
+          else
+            raise TypeError, "expected other to be a #{self.class}"
+          end
         end
       end
 
@@ -106,6 +115,11 @@ module GraphQL
             nil
           end
         end
+
+        # XXX: Remove type merging
+        def |(*)
+          self
+        end
       end
 
       class InterfaceType < TypeModule
@@ -114,21 +128,16 @@ module GraphQL
       class UnionType < TypeModule
       end
 
-      module ObjectType
-        def self.new(type)
-          klass = Class.new
-          klass.send :include, InstanceMethods
-          klass.extend(ClassMethods)
-          klass.extend(ObjectType)
-          klass.type = type
-          klass
+      class ObjectType < TypeModule
+        attr_accessor :fields
+
+        def included(base)
+          base.extend(ClassMethods)
+          base.send :include, InstanceMethods
+          base.type = self.type
         end
 
         module ClassMethods
-          def inherited(obj)
-            obj.type = self.type
-          end
-
           def define_field(name, type)
             method_name = ActiveSupport::Inflector.underscore(name)
             define_method(method_name) do
@@ -147,7 +156,7 @@ module GraphQL
             end
           end
 
-          attr_accessor :type, :fields
+          attr_accessor :type
 
           def cast(value, errors)
             new(value, errors)
@@ -200,7 +209,7 @@ module GraphQL
       end
 
 
-      def self.class_for(type, cache)
+      def self.class_for(schema, type, cache)
         return cache[type] if cache[type]
 
         case type
@@ -211,9 +220,9 @@ module GraphQL
         when GraphQL::EnumType
           cache[type] = EnumType.new(type)
         when GraphQL::ListType
-          cache[type] = ListType.new(class_for(type.of_type, cache))
+          cache[type] = ListType.new(class_for(schema, type.of_type, cache))
         when GraphQL::NonNullType
-          cache[type] = NonNullType.new(class_for(type.of_type, cache))
+          cache[type] = NonNullType.new(class_for(schema, type.of_type, cache))
         when GraphQL::UnionType
           cache[type] = UnionType.new(type)
         when GraphQL::InterfaceType
@@ -222,12 +231,12 @@ module GraphQL
           cache[type] = klass = ObjectType.new(type)
 
           type.interfaces.each do |interface|
-            klass.send :include, class_for(interface, cache)
+            klass.send :include, class_for(schema, interface, cache)
           end
 
           klass.fields = {}
           type.all_fields.each do |field|
-            klass.fields[field.name.to_sym] = class_for(field.type, cache)
+            klass.fields[field.name.to_sym] = class_for(schema, field.type, cache)
           end
 
           klass

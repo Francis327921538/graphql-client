@@ -147,8 +147,12 @@ class TestSchemaType < MiniTest::Test
   end
 
   def test_query_object_subclass
-    query_klass = Class.new(Types::Query)
-    person_klass = Class.new(Types::Person)
+    query_klass = Class.new do
+      include Types::Query
+    end
+    person_klass = Class.new do
+      include Types::Person
+    end
 
     assert_equal QueryType, query_klass.type
     assert_equal PersonType, person_klass.type
@@ -177,11 +181,15 @@ class TestSchemaType < MiniTest::Test
   end
 
   def test_person_object_subclass
-    friend_klass = Class.new(Types::Person)
+    friend_klass = Class.new do
+      include Types::Person
+    end
     friend_klass.define_field :id, Types::Person.fields[:id]
     friend_klass.define_field :name, Types::Person.fields[:name]
 
-    person_klass = Class.new(Types::Person)
+    person_klass = Class.new do
+      include Types::Person
+    end
 
     person_klass.define_field :id, Types::Person.fields[:id]
     person_klass.define_field :name, Types::Person.fields[:name]
@@ -268,8 +276,12 @@ class TestSchemaType < MiniTest::Test
   end
 
   def test_interface_cast
-    query_klass = Class.new(Types::Query)
-    person_klass = Class.new(Types::Person)
+    query_klass = Class.new do
+      include Types::Query
+    end
+    person_klass = Class.new do
+      include Types::Person
+    end
     node_klass = GraphQL::Client::SchemaClass::PossibleTypes.new({"Person" => person_klass})
 
     query_klass.define_field :node, node_klass
@@ -292,8 +304,12 @@ class TestSchemaType < MiniTest::Test
   end
 
   def test_union_cast
-    query_klass = Class.new(Types::Query)
-    person_klass = Class.new(Types::Person)
+    query_klass = Class.new do
+      include Types::Query
+    end
+    person_klass = Class.new do
+      include Types::Person
+    end
     search_result_klass = GraphQL::Client::SchemaClass::PossibleTypes.new({"Person" => person_klass})
 
     query_klass.define_field :firstSearchResult, search_result_klass
