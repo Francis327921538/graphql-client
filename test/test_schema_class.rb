@@ -234,6 +234,10 @@ class TestSchemaType < MiniTest::Test
     end
 
     refute person.respond_to?(:missing)
+
+    GraphQL::Client::Deprecation.silence do
+      assert_equal "Joshua", person.firstName
+    end
   end
 
   def test_interface_cast

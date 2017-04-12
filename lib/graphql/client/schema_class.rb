@@ -2,6 +2,7 @@
 
 require "active_support/inflector"
 require "graphql"
+require "graphql/client/deprecation"
 require "graphql/client/errors"
 
 module GraphQL
@@ -158,10 +159,16 @@ module GraphQL
         end
 
         def define_field(name, type)
-          [name, ActiveSupport::Inflector.underscore(name)].uniq.each do |sym|
-            define_method(sym) do
+          method_name = ActiveSupport::Inflector.underscore(name)
+          define_method(method_name) do
+            type.cast(@data.fetch(name.to_s))
+          end
+
+          if name != method_name
+            define_method(name) do
               type.cast(@data.fetch(name.to_s))
             end
+            Deprecation.deprecate_methods(self, name => "Use ##{method_name} instead")
           end
         end
 
